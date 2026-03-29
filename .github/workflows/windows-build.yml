@@ -1,0 +1,36 @@
+name: Build for Windows
+on: [push, workflow_dispatch] # Собирать при каждом пуше или вручную
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.5.3' # Стандартная стабильная версия
+          arch: 'win64_msvc2019_64'
+
+      - name: Setup MSVC (Compiler)
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build Project
+        run: |
+          mkdir build
+          cd build
+          qmake ../*.pro  # Автоматически найдет твой .pro файл
+          nmake
+
+      - name: Deployment (Collect DLLs)
+        run: |
+          # Эта команда соберет все нужные .dll в папку с программой
+          windeployqt build/release/
+          
+      - name: Upload Finished App
+        uses: actions/upload-artifact@v4
+        with:
+          name: FATFS-Windows-v1
+          path: build/release/
