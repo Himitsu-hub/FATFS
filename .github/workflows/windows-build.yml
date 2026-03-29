@@ -11,9 +11,8 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
         with:
-          version: '6.5.3'
+          version: '6.8.0' # Обновили под требования твоего CMakeLists.txt
           arch: 'win64_msvc2019_64'
-          # Исправленные названия модулей для Qt 6
           modules: 'qtshadertools' 
 
       - name: Setup MSVC (Compiler)
@@ -24,36 +23,43 @@ jobs:
         run: |
           mkdir build
           cd build
-          # Ищем CMakeLists.txt
+          
+          # Находим файл CMakeLists.txt во всех подпапках
           $cmakeFile = Get-ChildItem -Path .. -Filter CMakeLists.txt -Recurse | Select-Object -First 1
+          if ($null -eq $cmakeFile) { throw "CMakeLists.txt не найден!" }
           $projectDir = Split-Path -Parent $cmakeFile.FullName
           
-          # Конфигурируем (указываем путь к Qt, который установил экшен)
+          # Конфигурируем проект с указанием пути к установленной Qt
           cmake -G "Visual Studio 17 2022" -A x64 -S $projectDir -B . -DCMAKE_PREFIX_PATH="$env:Qt6_DIR"
-          # Собираем
+          
+          # Собираем проект в режиме Release
           cmake --build . --config Release
 
       - name: Deployment (Collect DLLs)
         shell: pwsh
         run: |
-          # Ищем готовый .exe в папке Release
+          # Ищем скомпилированный файл .exe
           $exeFile = Get-ChildItem -Path . -Filter *.exe -Recurse | Where-Object { $_.FullName -like "*Release*" } | Select-Object -First 1
-          if ($null -eq $exeFile) { throw "EXE файл не найден! Проверь ошибки компиляции выше." }
+          if ($null -eq $exeFile) { throw "EXE файл не найден! Сборка не удалась." }
           
-          Write-Host "Нашел EXE: $($exeFile.FullName)"
+          Write-Host "Найден исполняемый файл: $($exeFile.FullName)"
           
-          # Ищем папку с QML файлами для деплоя
+          # Находим папку с QML файлами, чтобы windeployqt подтянул нужные плагины
           $qmlSource = Get-ChildItem -Path .. -Filter *.qml -Recurse | Select-Object -First 1 | ForEach-Object { Split-Path -Parent $_.FullName }
           
-          # Запускаем сборку зависимостей
-          windeployqt --release --qmldir "$qmlSource" "$($exeFile.FullName)"
+          # Собираем все зависимости (.dll) в папку с программой
+          if ($null -ne $qmlSource) {
+            windeployqt --release --qmldir "$qmlSource" "$($exeFile.FullName)"
+          } else {
+            windeployqt --release "$($exeFile.FullName)"
+          }
           
-          # Сохраняем путь к папке для загрузки
+          # Запоминаем путь к папке для этапа загрузки архива
           $outputDir = Split-Path -Parent $($exeFile.FullName)
           echo "DEPLOY_PATH=$outputDir" >> $env:GITHUB_ENV
 
       - name: Upload Finished App
         uses: actions/upload-artifact@v4
         with:
-          name: FATFS-Windows-App
+          name: FATFS-Windows-Ready
           path: ${{ env.DEPLOY_PATH }}
