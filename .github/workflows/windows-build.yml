@@ -13,8 +13,8 @@ jobs:
         with:
           version: '6.5.3'
           arch: 'win64_msvc2019_64'
-          # Добавляем модули для QML, так как у тебя есть Main.qml
-          modules: 'qtdeclarative qtlanguageserver'
+          # Исправленные названия модулей для Qt 6
+          modules: 'qtshadertools' 
 
       - name: Setup MSVC (Compiler)
         uses: ilammy/msvc-dev-cmd@v1
@@ -24,30 +24,36 @@ jobs:
         run: |
           mkdir build
           cd build
-          # Ищем где лежит CMakeLists.txt
+          # Ищем CMakeLists.txt
           $cmakeFile = Get-ChildItem -Path .. -Filter CMakeLists.txt -Recurse | Select-Object -First 1
           $projectDir = Split-Path -Parent $cmakeFile.FullName
           
-          # Конфигурируем и собираем
-          cmake -G "Visual Studio 17 2022" -A x64 -S $projectDir -B .
+          # Конфигурируем (указываем путь к Qt, который установил экшен)
+          cmake -G "Visual Studio 17 2022" -A x64 -S $projectDir -B . -DCMAKE_PREFIX_PATH="$env:Qt6_DIR"
+          # Собираем
           cmake --build . --config Release
 
       - name: Deployment (Collect DLLs)
         shell: pwsh
         run: |
-          # Ищем готовый .exe
+          # Ищем готовый .exe в папке Release
           $exeFile = Get-ChildItem -Path . -Filter *.exe -Recurse | Where-Object { $_.FullName -like "*Release*" } | Select-Object -First 1
-          if ($null -eq $exeFile) { throw "EXE файл не найден!" }
+          if ($null -eq $exeFile) { throw "EXE файл не найден! Проверь ошибки компиляции выше." }
           
-          # Запускаем windeployqt (обязательно с флагом --qmldir, так как у тебя QML проект)
-          $qmlDir = Get-ChildItem -Path .. -Filter *.qml -Recurse | Select-Object -First 1 | ForEach-Object { Split-Path -Parent $_.FullName } | Select-Object -Unique
-          windeployqt --release --qmldir $qmlDir $($exeFile.FullName)
+          Write-Host "Нашел EXE: $($exeFile.FullName)"
           
+          # Ищем папку с QML файлами для деплоя
+          $qmlSource = Get-ChildItem -Path .. -Filter *.qml -Recurse | Select-Object -First 1 | ForEach-Object { Split-Path -Parent $_.FullName }
+          
+          # Запускаем сборку зависимостей
+          windeployqt --release --qmldir "$qmlSource" "$($exeFile.FullName)"
+          
+          # Сохраняем путь к папке для загрузки
           $outputDir = Split-Path -Parent $($exeFile.FullName)
           echo "DEPLOY_PATH=$outputDir" >> $env:GITHUB_ENV
 
       - name: Upload Finished App
         uses: actions/upload-artifact@v4
         with:
-          name: FATFS-Windows-CMake-Build
+          name: FATFS-Windows-App
           path: ${{ env.DEPLOY_PATH }}
