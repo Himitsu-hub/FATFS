@@ -1,5 +1,5 @@
 name: Build for Windows
-on: [push, workflow_dispatch] # Собирать при каждом пуше или вручную
+on: [push, workflow_dispatch]
 
 jobs:
   build:
@@ -11,26 +11,42 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
         with:
-          version: '6.5.3' # Стандартная стабильная версия
+          version: '6.5.3'
           arch: 'win64_msvc2019_64'
 
       - name: Setup MSVC (Compiler)
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Build Project
+        shell: pwsh
         run: |
           mkdir build
           cd build
-          qmake ../*.pro  # Автоматически найдет твой .pro файл
+          # Умный поиск .pro файла во всех папках
+          $proFile = Get-ChildItem -Path .. -Filter *.pro -Recurse | Select-Object -First 1
+          if ($null -eq $proFile) { throw "Файл .pro не найден в репозитории!" }
+          Write-Host "Нашел проект: $($proFile.FullName)"
+          
+          qmake $proFile.FullName
           nmake
 
       - name: Deployment (Collect DLLs)
+        shell: pwsh
         run: |
-          # Эта команда соберет все нужные .dll в папку с программой
-          windeployqt build/release/
+          # Ищем скомпилированный .exe (в папке release или debug)
+          $exeFile = Get-ChildItem -Path . -Filter *.exe -Recurse | Where-Object { $_.FullName -like "*release*" -or $_.FullName -like "*debug*" } | Select-Object -First 1
+          if ($null -eq $exeFile) { throw "EXE файл не был собран!" }
+          Write-Host "Нашел программу: $($exeFile.FullName)"
           
+          # Запускаем сборку библиотек прямо в папке с экзешником
+          windeployqt $($exeFile.FullName)
+          
+          # Сохраняем путь к папке для следующего шага
+          $outputDir = Split-Path -Parent $($exeFile.FullName)
+          echo "DEPLOY_PATH=$outputDir" >> $env:GITHUB_ENV
+
       - name: Upload Finished App
         uses: actions/upload-artifact@v4
         with:
-          name: FATFS-Windows-v1
-          path: build/release/
+          name: FATFS-Windows-Complete
+          path: ${{ env.DEPLOY_PATH }}
